@@ -21,7 +21,7 @@ def pexpect_command(command, password):
     return proc.exitstatus
 
 
-def sync(keys, sources, dest, dst_path, password):
+def sync(keys, sources, dest, dst_path, password, port=None):
     # create remote dir
     if dst_path:
         pexpect_command(
@@ -38,13 +38,24 @@ def sync(keys, sources, dest, dst_path, password):
             print("ERROR: Path {} does not exist".format(source))
             continue
         print("Copying {}".format(source))
-        pexpect_command(
-            command="rsync {keys} {source} {destination}:{dst_path}".format(
+        if port:
+            # It means that we are connecting to the rsync daemon
+            rsync_command = "rsync {keys} {source} rsync://{destination}:{port}/{dst_path}".format(
+                keys=keys,
+                source=source,
+                destination=dest,
+                dst_path=dst_path,
+                port=port
+            )
+        else:
+            rsync_command = "rsync {keys} {source} {destination}:{dst_path}".format(
                 keys=keys,
                 source=source,
                 destination=dest,
                 dst_path=dst_path
-            ),
+            )
+        pexpect_command(
+            command=rsync_command,
             password=password
         )
 
@@ -93,18 +104,42 @@ if __name__ == "__main__":
 
     sources = arguments.ITEMS[:-1]
 
-    full_dst = arguments.ITEMS[-1]
-    dst_parts = full_dst.split(":", 1)
+    # Getting port
+    user_port_host_parts = arguments.ITEMS[-1].split("@", 1)
+    user = None
+    port = None
+    if len(user_port_host_parts) > 1:
+        user_port_parts = user_port_host_parts[0].split(":", 1)
+        if len(user_port_parts) > 1:
+            try:
+                port = int(user_port_parts[1])
+            except ValueError:
+                print("Port should be a number")
+                sys.exit(3)
+        user = user_port_parts[0]
+        host_path = user_port_host_parts[1]
+    else:
+        host_path = user_port_host_parts[0]
 
-    dst = dst_parts[0]
+    # Getting path
+    host_path_parts = host_path.split(":", 1)
+    host = host_path_parts[0]
     dst_path = ""
-    if len(dst_parts) > 1:
-        dst_path = dst_parts[1]
+    if len(host_path_parts) > 1:
+        dst_path = host_path_parts[1]
+
+    # Combine destination
+    if user:
+        dst = "{user}@{host}".format(
+            user=user,
+            host=host
+        )
+    else:
+        dst = host
 
     # Copy
     try:
-        sync(keys=keys, sources=sources, dest=dst, dst_path=dst_path, password=arguments.password)
-        sys.exit(0)
+        sync(keys=keys, sources=sources, dest=dst, dst_path=dst_path, password=arguments.password, port=port)
     except EOF:
         # split user@IP to display unreachable IP
         dst_split = dst.split("@", 1)
